@@ -42,7 +42,7 @@ what Hot Serializer does NOT guarantee:
 
         b: B
 
-        hs.serialize(&b, data)
+        hs.deserialize(&b, data)
 
         assert(a.position == b.position)
         assert(a.velocity == b.velocity)

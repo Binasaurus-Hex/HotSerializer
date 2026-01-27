@@ -333,3 +333,42 @@ bitset_modification_deletion :: proc(t: ^testing.T){
     testing.expect(t, set_b == bit_set[HeightB] { .Ground, .Middle })
 }
 
+@test
+array_length_modification :: proc(t: ^testing.T){
+    Entity :: struct {
+        position: [2]f32,
+        velocity: [2]f32
+    }
+
+    make_entity :: proc(i: int) -> Entity {
+        return {
+            position = [2]f32 { f32(i), f32(i * 2) },
+            velocity = { 9, 9 }
+        }
+    }
+    entities: [1000]Entity
+    for &entity, i in entities {
+        entity = make_entity(i)
+    }
+
+    data := hs.serialize(&entities)
+    defer delete(data)
+
+    less_entities: [500]Entity
+    hs.deserialize(&less_entities, data)
+
+    for &entity, i in less_entities {
+        testing.expect(t, entity == make_entity(i))
+    }
+
+    more_entities: [2000]Entity
+    hs.deserialize(&more_entities, data)
+    for &entity, i in more_entities {
+        expected := make_entity(i)
+        if i >= len(entities) {
+            expected = {}
+        }
+
+        testing.expect(t, entity == expected)
+    }
+}

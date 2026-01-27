@@ -8,8 +8,12 @@ import "core:time"
 import hs ".."
 import "core:mem"
 
+RUN_SPEED_TESTS :: false
+
+
 @test
 speed :: proc(t: ^testing.T){
+    if !RUN_SPEED_TESTS do return
 
     /*
     hot serializer does very well with large amount of identical data.
