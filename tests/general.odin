@@ -1,7 +1,8 @@
 package tests
 
 import "core:testing"
-import "core:fmt"
+import "core:mem"
+import "core:slice"
 import hs ".."
 
 // STRUCTS //
@@ -371,4 +372,38 @@ array_length_modification :: proc(t: ^testing.T){
 
         testing.expect(t, entity == expected)
     }
+}
+
+@test
+pointer_types_ignored :: proc(t: ^testing.T){
+    Person :: struct {
+        age: int,
+        house: int
+    }
+    Car :: struct {
+        wheels: int,
+        weight: f32,
+    }
+
+    A :: struct {
+        people: map[string]Person,
+        cars: [dynamic]Car,
+        current_car: ^Car
+    }
+
+    a: A
+    a.people["harry"] = {21, 99}
+
+    append(&a.cars, Car{4, 250})
+    a.current_car = &a.cars[0]
+
+    data := hs.serialize(&a)
+    defer delete(data)
+
+    b: A
+    hs.deserialize(&b, data)
+
+    empty: A
+
+    testing.expect(t, slice.equal(mem.ptr_to_bytes(&b), mem.ptr_to_bytes(&empty)))
 }
