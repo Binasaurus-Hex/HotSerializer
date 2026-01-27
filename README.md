@@ -12,7 +12,8 @@ Hot Serializer is a fast serializer/deserializer for odin, that works well for u
 
 ## Basic Example
 ```odin
-import hs "hot_serializer"
+package main
+import hs "HotSerializer"
 
 main :: proc(){
     A :: struct {
@@ -46,7 +47,8 @@ main :: proc(){
 ## Renaming / Excluding
 you can use struct field tags to change how hs works.
 ```odin
-    import hs "hot_serializer"
+    package main
+    import hs "HotSerializer"
 
     main :: proc(){
         A :: struct {
