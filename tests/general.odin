@@ -388,7 +388,8 @@ pointer_types_ignored :: proc(t: ^testing.T){
     A :: struct {
         people: map[string]Person,
         cars: [dynamic]Car,
-        current_car: ^Car
+        current_car: ^Car,
+        large_cars: []Car
     }
 
     a: A
@@ -396,6 +397,8 @@ pointer_types_ignored :: proc(t: ^testing.T){
 
     append(&a.cars, Car{4, 250})
     a.current_car = &a.cars[0]
+
+    a.large_cars = a.cars[:]
 
     data := hs.serialize(&a)
     defer delete(data)

@@ -512,7 +512,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             return saved_type.identical
 
         // ignored pointer types
-        case rt.Type_Info_Pointer, rt.Type_Info_Map, rt.Type_Info_Dynamic_Array, rt.Type_Info_String:
+        case rt.Type_Info_Pointer, rt.Type_Info_Map, rt.Type_Info_Dynamic_Array, rt.Type_Info_String, rt.Type_Info_Slice:
             saved_type.identical = false
             return saved_type.identical
         }
