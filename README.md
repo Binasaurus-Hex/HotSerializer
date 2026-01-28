@@ -70,9 +70,10 @@ you can use struct field tags to change how hs works.
 - the temp_value has a value of "-". This tells hs to ignore the field.
 ## Serialization / Deserialization relative speed
 <img width="600" height="390" alt="bar-graph (3)" src="https://github.com/user-attachments/assets/1b005b7d-22be-40fb-92be-d071c76517e5" />
+<img width="600" height="390" alt="bar-graph (4)" src="https://github.com/user-attachments/assets/c3e0bb06-0f23-47c5-be9c-8c9aca53b6ff" />
 
-- serialization is always very fast, regardless of the structure of the data.
-- deserialization can be arbitrarily slower depending on exactly how different the data is.
+- hs serialization is always very fast, regardless of the structure of the data.
+- hs deserialization can be arbitrarily slower depending on exactly how different the data is.
 
 ## Further Info
 for more info, check out doc.odin, or look through the tests
