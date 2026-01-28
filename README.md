@@ -4,10 +4,10 @@ Hot Serializer is a fast serializer/deserializer for odin, that works well for u
 - we dont need a human readable or widely compatible format
 - we do minimal type changes per iteration (data is mostly identical)
 
-## Speed (linear scale) (HS is there, just too small to be visible on the graph)
+## Speed (linear scale)
 <img width="600" height="390" alt="bar-graph" src="https://github.com/user-attachments/assets/d962f320-ce7a-48d6-90ac-82b76140b093" />
 
-## Speed( logarithmic scale) ( you can see it now )
+## Speed( logarithmic scale)
 <img width="600" height="390" alt="bar-graph (1)" src="https://github.com/user-attachments/assets/6525e81f-4dbc-4afd-a202-f0d7b18555ff" />
 
 ## Basic Example
