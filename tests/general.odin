@@ -392,6 +392,7 @@ pointer_types_ignored :: proc(t: ^testing.T){
         large_cars: []Car
     }
 
+    context.allocator = context.temp_allocator
     a: A
     a.people["harry"] = {21, 99}
 
@@ -401,7 +402,6 @@ pointer_types_ignored :: proc(t: ^testing.T){
     a.large_cars = a.cars[:]
 
     data := hs.serialize(&a)
-    defer delete(data)
 
     b: A
     hs.deserialize(&b, data)
@@ -409,4 +409,52 @@ pointer_types_ignored :: proc(t: ^testing.T){
     empty: A
 
     testing.expect(t, slice.equal(mem.ptr_to_bytes(&b), mem.ptr_to_bytes(&empty)))
+}
+
+@test
+bit_fields :: proc(t: ^testing.T){
+
+    Height :: enum {
+        Low, Middle, High
+    }
+
+    A :: bit_field u64 {
+        height: Height | 8,
+        x: int | 3,
+        y: int | 3,
+        checked: bool | 1,
+        interlaced: bool | 1
+    }
+
+    a := A {
+        height = .Middle,
+        x = -1,
+        y = 2,
+        checked = false,
+        interlaced = true
+    }
+
+    NewHeight :: enum {
+        Floor, Low, Middle, High
+    }
+
+    B :: bit_field u64 {
+        checked: bool | 1,
+        x: int | 3,
+        y: int | 3,
+        interlaced: bool | 1,
+        height: NewHeight | 8,
+    }
+
+    data := hs.serialize(&a)
+    defer delete(data)
+
+    b: B
+    hs.deserialize(&b, data)
+
+    testing.expect(t, b.height == .Middle)
+    testing.expect(t, a.x == b.x)
+    testing.expect(t, a.y == b.y)
+    testing.expect(t, a.checked == b.checked)
+    testing.expect(t, a.interlaced == b.interlaced)
 }

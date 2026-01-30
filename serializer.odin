@@ -9,22 +9,41 @@ import rt "base:runtime"
 TAG :: "hs"
 CAST_PRIMITIVES :: #config(CAST_PRIMITIVES, true)
 
+/*
+-- High level overview --
+
+serialize
+- recurses the type information of what you pass in,
+  and saves out the the information into our own structures that mirror odin's.
+
+- then dumps this information, followed by the binary of the value you are serializing,
+  into a slice of bytes.
+
+deserialize
+- unpacks the type information from the bytes, and then the bytes of the value
+
+- recurses over the type information of the current value we are deserializing into,
+  and attempts to write from the source value to the destination value
+
+- each recursive call returns whether or not that value was identical between our saved type info,
+  and odin's current info
+
+- this allows us to skip future cases of deserializing identical types, we instead just skip to the fallback option,
+  which is a mem copy (faster).
+*/
+
 serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
 
     SerializationCtx :: struct {
         types:          [dynamic]TypeInfo,
         struct_fields:  [dynamic]Struct_Field,
+        bit_fields:     [dynamic]Bit_Field,
         enum_fields:    [dynamic]Enum_Field,
         handles:        [dynamic]TypeInfo_Handle,
         arena:          [dynamic]byte,
     }
     ctx := SerializationCtx {}
-
-    ctx.types.allocator = context.temp_allocator
-    ctx.struct_fields.allocator = context.temp_allocator
-    ctx.enum_fields.allocator = context.temp_allocator
-    ctx.handles.allocator = context.temp_allocator
-    ctx.arena.allocator = context.temp_allocator
+    context.allocator = context.temp_allocator
 
     save_type :: proc(ctx: ^SerializationCtx, type: typeid) -> TypeInfo_Handle {
 
@@ -116,6 +135,27 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
                 elem = elem
             }
 
+        case rt.Type_Info_Bit_Field:
+            save_bit_field := TypeInfo_Bit_Field {}
+            save_bit_field.backing_type = save_type(ctx, v.backing_type.id)
+
+            actual_fields := reflect.bit_fields_zipped(type)
+            save_bit_field.fields = append_slice(&ctx.bit_fields, len(actual_fields))
+            for i in 0..<save_bit_field.fields.length {
+                field := actual_fields[i]
+
+                field_name := to_index_string(&ctx.arena, field.name)
+                field_type := save_type(ctx, field.type.id)
+
+                ctx.bit_fields[i + save_bit_field.fields.index] = {
+                    name = field_name,
+                    type = field_type,
+                    bit_size = field.size,
+                    bit_offset = field.offset
+                }
+            }
+            save_info.variant = save_bit_field
+
         case rt.Type_Info_Union:
 
             tag_type := save_type(ctx, v.tag_type.id)
@@ -146,17 +186,19 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
     }
 
 
-    header.types = ctx.types[:]
-    header.struct_fields = ctx.struct_fields[:]
-    header.enum_fields = ctx.enum_fields[:]
-    header.handles = ctx.handles[:]
-    header.arena = ctx.arena[:]
+    header.types =          ctx.types[:]
+    header.struct_fields =  ctx.struct_fields[:]
+    header.bit_fields =     ctx.bit_fields[:]
+    header.enum_fields =    ctx.enum_fields[:]
+    header.handles =        ctx.handles[:]
+    header.arena =          ctx.arena[:]
 
     bytes := make([dynamic]byte, allocator)
 
     append(&bytes, ..mem.ptr_to_bytes(&header))
     append(&bytes, ..mem.slice_to_bytes(header.types))
     append(&bytes, ..mem.slice_to_bytes(header.struct_fields))
+    append(&bytes, ..mem.slice_to_bytes(header.bit_fields))
     append(&bytes, ..mem.slice_to_bytes(header.enum_fields))
     append(&bytes, ..mem.slice_to_bytes(header.handles))
     append(&bytes, ..mem.slice_to_bytes(header.arena))
@@ -175,7 +217,7 @@ get_typeinfo_base :: proc(header: ^SaveHeader, handle: TypeInfo_Handle) -> (base
     return base, true
 }
 
-get_typeinfo_ptr :: proc(header: ^SaveHeader, handle: TypeInfo_Handle) -> (ptr: ^TypeInfo, ok: bool) {
+get_typeinfo_ptr :: proc(header: ^SaveHeader, handle: TypeInfo_Handle) -> (ptr: ^TypeInfo, ok: bool) #no_bounds_check {
     index := int(handle) - 1
     return &header.types[index], true
 }
@@ -198,6 +240,7 @@ deserialize :: proc(t: ^$T, data: []byte) {
 
     extract_slice(&header.types,        &data)
     extract_slice(&header.struct_fields,&data)
+    extract_slice(&header.bit_fields,   &data)
     extract_slice(&header.enum_fields,  &data)
     extract_slice(&header.handles,      &data)
     extract_slice(&header.arena,        &data)
@@ -210,12 +253,36 @@ deserialize :: proc(t: ^$T, data: []byte) {
     identical := deserialize_raw(header, uintptr(&body[0]), uintptr(t), header.stored_type, type_info_of(T))
 }
 
-find_matching_field :: proc(header: ^SaveHeader, struct_info: ^TypeInfo_Struct, name: string) -> (^Struct_Field, bool) {
-    for &field in to_slice(header.struct_fields, struct_info.fields) {
+find_matching_field_index :: proc(header: ^SaveHeader, fields: []$T, name: string) -> (index: int, found: bool) {
+    for &field, i in fields {
         if resolve_to_string(header.arena, field.name) != name do continue
-        return &field, true
+        return i, true
     }
-    return nil, false
+    return -1, false
+}
+
+fully_match_field :: proc(header: ^SaveHeader, fields: []$T, name: string, tag: string) -> (index: int, found: bool){
+
+    tag_values := []string {}
+
+    if t, ok := reflect.struct_tag_lookup(reflect.Struct_Tag(tag), TAG); ok {
+        tag_values = strings.split(t, ",", context.temp_allocator)
+    }
+
+    // ignore this field
+    if slice.contains(tag_values, "-") {
+        return
+    }
+
+    index, found = find_matching_field_index(header, fields, name)
+    if found do return
+
+
+    for alias in tag_values {
+        index, found  = find_matching_field_index(header, fields, alias)
+        if found do return
+    }
+    return
 }
 
 enum_identical :: proc(header: ^SaveHeader, a: ^TypeInfo, b: ^rt.Type_Info) -> bool {
@@ -245,7 +312,7 @@ get_name_info_ptr :: proc(t: ^rt.Type_Info) -> (s: string, ok: bool) {
     return named.name, true
 }
 
-deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeInfo_Handle, dst_type: ^rt.Type_Info) -> (identical: bool){
+deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeInfo_Handle, dst_type: ^rt.Type_Info) -> (identical: bool) #no_bounds_check {
     saved_type, found_saved := get_typeinfo_base(header, src_type)
     assert(found_saved)
 
@@ -268,32 +335,12 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             fields := reflect.struct_fields_zipped(dst_type.id)
             identical_fields: int
 
+            saved_fields := to_slice(header.struct_fields, saved_struct.fields)
+
             for field in fields {
 
-                tag_values: []string = {}
-
-                if tag, ok := reflect.struct_tag_lookup(field.tag, TAG); ok {
-                    tag_values = strings.split(tag, ",", context.temp_allocator)
-
-                    // ignore this field
-                    if slice.contains(tag_values, "-") {
-                        continue
-                    }
-                }
-
-                saved_field, field_found := find_matching_field(header, saved_struct, field.name)
-
-                // check aliases
-                if !field_found {
-                    for alias in tag_values {
-                        saved_field = find_matching_field(header, saved_struct, alias) or_continue
-                        field_found = true
-                    }
-
-                    if !field_found {
-                        continue
-                    }
-                }
+                field_index := fully_match_field(header, saved_fields, field.name, string(field.tag)) or_continue
+                saved_field := saved_fields[field_index]
 
                 if saved_field.offset != field.offset do saved_type.identical = false
                 field_src := src + saved_field.offset
@@ -457,6 +504,31 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
             return saved_type.identical
 
+        case rt.Type_Info_Bit_Field:
+            saved_bit_field := (&saved_type.variant.(TypeInfo_Bit_Field)) or_break
+            fields := reflect.bit_fields_zipped(dst_type.id)
+
+            saved_fields := to_slice(header.bit_fields, saved_bit_field.fields)
+
+            matching_fields: int
+            for field in fields {
+
+                field_index := fully_match_field(header, saved_fields, field.name, string(field.tag)) or_continue
+
+                matching_field: Bit_Field = saved_fields[field_index]
+
+                source_bits :u64 = read_bits(cast([^]byte)src, matching_field.bit_offset, matching_field.bit_size)
+                temporary_destination: u64
+                field_identical := deserialize_raw(header, uintptr(&source_bits), uintptr(&temporary_destination), matching_field.type, field.type)
+
+                write_bits(cast([^]byte)dst, field.offset, field.size, temporary_destination)
+                if field_identical && matching_field.bit_offset == field.offset {
+                    matching_fields += 1
+                }
+            }
+            saved_type.identical = matching_fields == len(fields)
+            return saved_type.identical
+
         case rt.Type_Info_Union:
             saved_union := (&saved_type.variant.(TypeInfo_Union)) or_break
 
@@ -568,6 +640,17 @@ TypeInfo_Struct :: struct {
     fields: IndexSlice(Struct_Field)
 }
 
+Bit_Field :: struct {
+    name: IndexString,
+    bit_size, bit_offset: uintptr,
+    type: TypeInfo_Handle,
+}
+
+TypeInfo_Bit_Field :: struct {
+    backing_type: TypeInfo_Handle,
+    fields: IndexSlice(Bit_Field),
+}
+
 Enum_Field :: struct {
     name: IndexString,
     value: i64
@@ -619,7 +702,8 @@ TypeInfo :: struct {
         TypeInfo_Array,
         TypeInfo_Enumerated_Array,
         TypeInfo_Bit_Set,
-        TypeInfo_Union
+        TypeInfo_Union,
+        TypeInfo_Bit_Field
     },
 
     // deserialization info
@@ -630,6 +714,7 @@ TypeInfo :: struct {
 SaveHeader :: struct {
     types: []TypeInfo,
     struct_fields: []Struct_Field,
+    bit_fields: []Bit_Field,
     enum_fields: []Enum_Field,
     handles: []TypeInfo_Handle,
     arena: []byte,
@@ -652,7 +737,7 @@ to_index_string :: proc(buffer: ^[dynamic]byte, s: string) -> IndexString {
     return IndexString(to_index_slice(buffer, transmute([]byte)s))
 }
 
-to_slice :: proc(buffer: []$T, is: IndexSlice(T)) -> []T {
+to_slice :: proc(buffer: []$T, is: IndexSlice(T)) -> []T #no_bounds_check {
     return buffer[is.index: is.index + is.length]
 }
 
@@ -660,7 +745,7 @@ resolve_to_slice :: proc(buffer: []byte, is: IndexSlice($T)) -> []T {
     return slice.reinterpret([]T, buffer[is.index: is.index + is.length * size_of(T)])
 }
 
-resolve_to_string :: proc(buffer: []byte, is: IndexString) -> string {
+resolve_to_string :: proc(buffer: []byte, is: IndexString) -> string #no_bounds_check {
     return string(buffer[is.index: is.index + is.length])
 }
 
@@ -669,3 +754,27 @@ IndexSlice :: struct($T: typeid) {
 }
 
 IndexString :: distinct IndexSlice(byte)
+
+
+read_bits :: proc(ptr: [^]byte, offset, size: uintptr) -> (res: u64) {
+	for i in 0..<size {
+		j := i+offset
+		B := ptr[j/8]
+		k := j&7
+		if B & (u8(1)<<k) != 0 {
+			res |= u64(1)<<u64(i)
+		}
+	}
+	return
+}
+
+write_bits :: proc(dst: [^]byte, offset, size: uintptr, value: u64) {
+    for i in 0..<size {
+        j := i + offset
+        B := &dst[j/8]
+        k := j & 7
+        if value & (u64(1) << i) != 0 {
+            B^ |= u8(1) << k
+        }
+    }
+}
