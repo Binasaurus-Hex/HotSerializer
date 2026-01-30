@@ -378,31 +378,9 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             enum_get_value :: proc(header: ^SaveHeader, e: ^TypeInfo_Enum, src: rawptr) -> (value: i64, valid: bool) {
                 base := get_typeinfo_base(header, e.base) or_return
                 a := mem.make_any(src, base.id)
-                valid = true
-                switch v in a {
-                case i8:  value = i64(v)
-                case i16: value = i64(v)
-                case i32: value = i64(v)
-                case i64: value = v
-                case int: value = i64(v)
-                case:
-                    valid = false
-                }
+                value, valid = any_get_i64(a)
                 return
             }
-
-            any_assign_i64 :: proc(a: any, value: i64){
-                switch &v in a {
-                case i8: v = i8(value)
-                case i16: v = i16(value)
-                case i32: v = i32(value)
-                case i64: v = value
-                case int: v = int(value)
-                }
-            }
-
-            if saved_type.size != size_of(i64) do break
-            if dst_type.size != size_of(i64) do break
 
             src_value :i64 = enum_get_value(header, saved_enum, rawptr(src)) or_break
 
@@ -552,32 +530,43 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             tag_type, found_tag_type := get_typeinfo_base(header, saved_union.tag_type)
             assert(found_tag_type)
 
-            assert(tag_type.id == u32)
-            assert(v.tag_type.id == u32)
+            src_tag := mem.make_any(rawptr(src + saved_union.tag_offset), tag_type.id)
+            dst_tag := mem.make_any(rawptr(dst + v.tag_offset), v.tag_type.id)
 
-            src_tag := cast(^u32)(src + saved_union.tag_offset)
-            dst_tag := cast(^u32)(dst + v.tag_offset)
+            local_src_tag := any_get_i64(src_tag) or_break
+            if local_src_tag == 0 do break
 
-            if src_tag^ == 0 do break
-
-            src_variant := saved_variants[src_tag^ - 1]
+            src_variant := saved_variants[local_src_tag - 1]
             src_name, has_src_name := get_name(header, src_variant)
-            assert(has_src_name)
+
+            src_variant_id: typeid
+            if !has_src_name {
+                source_typeinfo, found_info := get_typeinfo_ptr(header, src_variant)
+                assert(found_info)
+                src_variant_id = source_typeinfo.id
+            }
+
+            local_dst_tag: i64
 
             for variant, i in actual_variants {
-                name, ok := get_name_info_ptr(variant)
-                assert(ok, "union variants must be structs or 'distinct' types")
-                if name != src_name do continue
-                dst_tag^ = u32(i + 1)
+                if has_src_name {
+                    name := get_name_info_ptr(variant) or_continue
+                    if name != src_name do continue
+                }
+                else {
+                    if variant.id != src_variant_id do continue
+                }
+                local_dst_tag = i64(i + 1)
                 break
             }
 
             // if we couldnt find the tag, just leave the union zeroed out
-            if dst_tag^ == 0 {
+            if local_dst_tag == 0 {
                 return saved_type.identical
             }
 
-            dst_variant := actual_variants[dst_tag^ - 1]
+            dst_variant := actual_variants[local_dst_tag - 1]
+            any_assign_i64(dst_tag, local_dst_tag)
 
             deserialize_raw(header, src, dst, src_variant, dst_variant)
 
@@ -592,6 +581,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
     // specified small types that dont automatically transmute
     when CAST_PRIMITIVES {
+
         try_cast :: proc(a, b: typeid, $A: typeid, $B: typeid, src, dst: uintptr) -> (casted: bool) {
             if a == b do return
             if a != A do return
@@ -607,15 +597,16 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             return false
         }
 
-
-        if try_cast_symmetric(saved_type.id, dst_type.id, f32, f64, src, dst){
-            return false
-        }
-        if try_cast_symmetric(saved_type.id, dst_type.id, f32, f16, src, dst){
-            return false
-        }
-        if try_cast_symmetric(saved_type.id, dst_type.id, f64, f16, src, dst){
-            return false
+        if saved_type.id != dst_type.id {
+            if try_cast_symmetric(saved_type.id, dst_type.id, f32, f64, src, dst){
+                return false
+            }
+            if try_cast_symmetric(saved_type.id, dst_type.id, f32, f16, src, dst){
+                return false
+            }
+            if try_cast_symmetric(saved_type.id, dst_type.id, f64, f16, src, dst){
+                return false
+            }
         }
     }
 
@@ -755,6 +746,44 @@ IndexSlice :: struct($T: typeid) {
 
 IndexString :: distinct IndexSlice(byte)
 
+any_get_f64 :: proc(a: any)
+
+any_get_i64 :: proc(a: any) -> (value: i64, valid: bool) {
+    valid = true
+    switch v in a {
+    case i8:  value = i64(v)
+    case i16: value = i64(v)
+    case i32: value = i64(v)
+    case i64: value = v
+    case int: value = i64(v)
+
+    // uint
+    case u8:  value = i64(v)
+    case u16: value = i64(v)
+    case u32: value = i64(v)
+    case u64: value = i64(v)
+    case uint: value = i64(v)
+    case:
+        valid = false
+    }
+    return
+}
+
+any_assign_i64 :: proc(a: any, value: i64){
+    switch &v in a {
+    case i8: v = i8(value)
+    case i16: v = i16(value)
+    case i32: v = i32(value)
+    case i64: v = value
+    case int: v = int(value)
+
+    case u8:  v = u8(value)
+    case u16: v = u16(value)
+    case u32: v = u32(value)
+    case u64: v = u64(value)
+    case uint: v = uint(value)
+    }
+}
 
 read_bits :: proc(ptr: [^]byte, offset, size: uintptr) -> (res: u64) {
 	for i in 0..<size {

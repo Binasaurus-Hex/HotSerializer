@@ -224,6 +224,40 @@ enumerated_array_modification :: proc(t: ^testing.T){
 }
 
 @test
+union_primitives :: proc(t: ^testing.T){
+    Value :: union {
+        [2]f32,
+        [2]i32,
+        bool
+    }
+
+    v: Value = [2]f32 { 1, 2 }
+
+    data := hs.serialize(&v)
+    defer delete(data)
+
+    Thing :: struct {
+        blobs: [10]int
+    }
+
+    Value2 :: union {
+        Thing,
+        [3]f32,
+        [2]i32,
+        [2]f32,
+        bool
+    }
+
+    v2: Value2
+    hs.deserialize(&v2, data)
+
+    coord, is_coord := v2.([2]f32)
+
+    testing.expect(t, is_coord)
+    testing.expect(t, coord == [2]f32 { 1, 2 })
+}
+
+@test
 union_modification :: proc(t: ^testing.T){
     Circle :: struct {
         centre: [2]f32,
@@ -233,7 +267,7 @@ union_modification :: proc(t: ^testing.T){
         origin, size: [2]f32,
     }
 
-    ShapeA :: union {
+    ShapeA :: union{
         Circle, Rectangle
     }
 
