@@ -66,8 +66,9 @@ you can use struct field tags to change how hs works.
         }
     }
 ```
-- the grid_location has two aliases: `grid_index` and `grid_id`. hs will look for these field names when deserializing.
-- the temp_value has a value of `-`. This tells hs to ignore the field.
+- `grid_location` has two aliases: `grid_index` and `grid_id`. hs will look for these field names when deserializing.
+- `temp_value` has a value of `-`. This tells hs to ignore the field.
+
 ## Features / Limitations
 ### Enum, BitSet, Enumerated-Array support
 Enums and their derivatives: bit_sets and enumerated_arrays, are handled properly.
@@ -82,10 +83,29 @@ Unions will match on named values first, i.e `Name :: struct`, and then will def
 Types such as `string`, `map[K]V`, `[dynamic]T`, `[]T`, or `^T` do not contain the memory within the type itself, but rather contain a pointer to the memory.
 These are currently not supported. If you include one of these in your data structure, they will be ignored.
 ### Limited support for primitive type conversion
-Currently most primitive types are transmuted. meaning a `i32` which is modified to an `i64`, will simply be copied over without a proper cast. In many cases this works fine, but I wouldn't rely on it currently.
-The types that currently are casted properly are as follows:
+currently there is some limited support for primitive type casting. Below is a list of all primitives that can cast between each other:
 
-`f16`, `f32`, `f64`
+`f16`,
+`f32`,
+`f64`,
+
+`u8`,
+`u16`,
+`u32`,
+`u64`,
+`uint`,
+
+`i8`,
+`ì16`,
+`i32`,
+`i64`,
+`int`,
+
+`b8`,
+`b16`,
+`b32`,
+`b64`,
+`bool`,
 
 ## Serialization / Deserialization relative speed
 <img width="600" height="390" alt="bar-graph (3)" src="https://github.com/user-attachments/assets/1b005b7d-22be-40fb-92be-d071c76517e5" />

@@ -582,29 +582,12 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
     // specified small types that dont automatically transmute
     when CAST_PRIMITIVES {
 
-        try_cast :: proc(a, b: typeid, $A: typeid, $B: typeid, src, dst: uintptr) -> (casted: bool) {
-            if a == b do return
-            if a != A do return
-            if b != B do return
-            a_val: A = (transmute(^A)src)^
-            b_ptr: ^B = transmute(^B)dst
-            b_ptr^ = B(a_val)
-            return true
-        }
-        try_cast_symmetric :: proc(a, b: typeid, $A: typeid, $B: typeid, src, dst: uintptr) -> (casted: bool) {
-            if try_cast(a, b, A, B, src, dst) do return true
-            if try_cast(a, b, B, A, src, dst) do return true
-            return false
-        }
-
         if saved_type.id != dst_type.id {
-            if try_cast_symmetric(saved_type.id, dst_type.id, f32, f64, src, dst){
-                return false
-            }
-            if try_cast_symmetric(saved_type.id, dst_type.id, f32, f16, src, dst){
-                return false
-            }
-            if try_cast_symmetric(saved_type.id, dst_type.id, f64, f16, src, dst){
+
+            a := mem.make_any(rawptr(src), saved_type.id)
+            b := mem.make_any(rawptr(dst), dst_type.id)
+
+            if any_to_any(a, b){
                 return false
             }
         }
@@ -746,27 +729,176 @@ IndexSlice :: struct($T: typeid) {
 
 IndexString :: distinct IndexSlice(byte)
 
-any_get_f64 :: proc(a: any)
-
-any_get_i64 :: proc(a: any) -> (value: i64, valid: bool) {
+any_get_f64 :: proc(a: any) -> (value: f64, valid: bool) {
     valid = true
-    switch v in a {
-    case i8:  value = i64(v)
-    case i16: value = i64(v)
-    case i32: value = i64(v)
-    case i64: value = v
-    case int: value = i64(v)
+    info := type_info_of(a.id)
+    #partial switch info in info.variant {
+    case rt.Type_Info_Float:
+        switch v in a {
+        case f16: value = f64(v)
+        case f32: value = f64(v)
+        case f64: value = v
+        case: valid = false
+        }
+    case rt.Type_Info_Integer:
+        int_value: i64
+        int_value, valid = any_get_i64(a)
+        if valid do value = f64(int_value)
+        return
+    }
+    return
+}
 
-    // uint
-    case u8:  value = i64(v)
-    case u16: value = i64(v)
-    case u32: value = i64(v)
-    case u64: value = i64(v)
-    case uint: value = i64(v)
+any_get_bool :: proc(a: any) -> (value: bool, valid: bool) {
+    valid = true
+    info := type_info_of(a.id)
+    #partial switch info in info.variant {
+    case rt.Type_Info_Boolean:
+        switch v in a {
+        case b8: value = bool(v)
+        case b16: value = bool(v)
+        case b32: value = bool(v)
+        case b64: value = bool(v)
+        case bool: value = v
+        case: valid = false
+        }
+    case rt.Type_Info_Integer, rt.Type_Info_Float:
+        int_value :u64
+        int_value, valid = any_get_u64(a)
+        if valid do value = bool(int_value)
     case:
         valid = false
     }
     return
+}
+
+any_get_u64 :: proc(a: any) -> (value: u64, valid: bool) {
+    valid = true
+    info := type_info_of(a.id)
+
+    #partial switch info in info.variant {
+    case rt.Type_Info_Integer:
+        if info.signed {
+            signed_value: i64
+            signed_value, valid = any_get_i64(a)
+            if valid do value = u64(signed_value)
+            return
+        }
+        switch v in a {
+        case u8:    value = u64(v)
+        case u16:   value = u64(v)
+        case u32:   value = u64(v)
+        case u64:   value = v
+        case uint:  value = u64(v)
+        case: valid = false
+        }
+    case rt.Type_Info_Float:
+        float_value: f64
+        float_value, valid = any_get_f64(a)
+        if valid do value = u64(float_value)
+        return
+    case rt.Type_Info_Boolean:
+        bool_value: bool
+        bool_value, valid = any_get_bool(a)
+        if valid do value = u64(bool_value)
+    case:
+        valid = false
+    }
+    return
+}
+
+any_get_i64 :: proc(a: any) -> (value: i64, valid: bool) {
+    valid = true
+    info := type_info_of(a.id)
+
+    #partial switch info in info.variant {
+    case rt.Type_Info_Integer:
+        if !info.signed {
+            unsigned_value: u64
+            unsigned_value, valid = any_get_u64(a)
+            if valid do value = i64(unsigned_value)
+            return
+        }
+        switch v in a {
+        case i8:  value = i64(v)
+        case i16: value = i64(v)
+        case i32: value = i64(v)
+        case i64: value = v
+        case int: value = i64(v)
+        case: valid = false
+        }
+
+    case rt.Type_Info_Float:
+        float_value: f64
+        float_value, valid = any_get_f64(a)
+        if valid do value = i64(float_value)
+        return
+    case rt.Type_Info_Boolean:
+        bool_value: bool
+        bool_value, valid = any_get_bool(a)
+        if valid do value = i64(bool_value)
+    case:
+        valid = false
+    }
+    return
+}
+
+any_to_any :: proc(a: any, b: any) -> (valid: bool) {
+    info_b := type_info_of(b.id)
+    #partial switch info in info_b.variant {
+    case rt.Type_Info_Integer:
+        if info.signed {
+            if value, valid := any_get_i64(a); valid {
+                any_assign_i64(b, value)
+                return true
+            }
+        }
+        else {
+            if value, valid := any_get_u64(a); valid {
+                any_assign_u64(b, value)
+                return true
+            }
+        }
+    case rt.Type_Info_Float:
+        if value, valid := any_get_f64(a); valid {
+            any_assign_f64(b, value)
+            return true
+        }
+    case rt.Type_Info_Boolean:
+        if value, valid := any_get_bool(a); valid {
+            any_assign_bool(b, value)
+            return true
+        }
+    }
+    return false
+}
+
+any_assign_bool :: proc(a: any, value: bool){
+    switch &v in a {
+    case b8: v = b8(value)
+    case b16: v = b16(value)
+    case b32: v = b32(value)
+    case b64: v = b64(value)
+    case bool: v = value
+    }
+}
+
+any_assign_f64 :: proc(a: any, value: f64){
+    switch &v in a {
+    case f16: v = f16(value)
+    case f32: v = f32(value)
+    case f64: v = value
+    }
+}
+
+any_assign_u64 :: proc(a: any, value: u64){
+    switch &v in a {
+    case u8:  v = u8(value)
+    case u16: v = u16(value)
+    case u32: v = u32(value)
+    case u64: v = value
+    case uint: v = uint(value)
+    }
 }
 
 any_assign_i64 :: proc(a: any, value: i64){

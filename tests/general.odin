@@ -492,3 +492,34 @@ bit_fields :: proc(t: ^testing.T){
     testing.expect(t, a.checked == b.checked)
     testing.expect(t, a.interlaced == b.interlaced)
 }
+
+@test
+primitive_casting :: proc(t: ^testing.T){
+    A :: struct {
+        x: f32,
+        y: i64,
+        z: u16,
+        q: f32
+    }
+
+    a := A { 1, -2, 3, 1}
+
+    data := hs.serialize(&a)
+    defer delete(data)
+
+    B :: struct {
+        x: u16,
+        y: f32,
+        z: i64,
+        q: b32
+    }
+
+    b: B
+
+    hs.deserialize(&b, data)
+
+    testing.expect(t, b.x == 1)
+    testing.expect(t, b.y == -2)
+    testing.expect(t, b.z == 3)
+    testing.expect(t, b.q == true)
+}
