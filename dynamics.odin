@@ -16,12 +16,17 @@ munch :: proc(bytes: ^[dynamic]byte, bytes_start: int, index: int, type: ^rt.Typ
             munch(bytes, bytes_start, index + int(offset), info.types[i])
         }
     case rt.Type_Info_String:
+
         raw := transmute(^mem.Raw_String)ptr
 
         mark := len(bytes)
-        raw_local := raw^
+        string_len := raw.len
+        string_data := raw.data
+        if info.is_cstring {
+            string_len = len(cstring(raw.data)) + 1
+        }
         raw.data = transmute([^]byte)(mark - bytes_start)
-        append(bytes, ..raw_local.data[:raw_local.len])
+        append(bytes, ..string_data[:string_len])
 
     case rt.Type_Info_Enumerated_Array:
         for i in 0..<info.count {

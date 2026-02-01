@@ -635,13 +635,29 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
         case rt.Type_Info_String:
 
+            saved_string := (&saved_type.variant.(TypeInfo_String)) or_break
+
             raw_src := transmute(^mem.Raw_String)src
             raw_src.data = transmute([^]byte)(uintptr(raw_src.data) + header.data_base)
+            src_len := raw_src.len
+            if saved_string.is_cstring {
+                src_len = len(cstring(raw_src.data))
+            }
 
-            copy := slice.clone(raw_src.data[:raw_src.len])
+            source_data := raw_src.data[:src_len]
+
+            output_size: int = src_len
+            if v.is_cstring {
+                output_size += 1
+            }
+
+            output := make([]byte, output_size)
+
+            copy(output, source_data)
 
             raw_dst := transmute(^mem.Raw_String)dst
-            raw_dst.data = &copy[0]
+            raw_dst.data = &output[0]
+
             raw_dst.len = raw_src.len
 
             saved_type.identical = false
