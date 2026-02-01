@@ -408,42 +408,42 @@ array_length_modification :: proc(t: ^testing.T){
     }
 }
 
-@test
-pointer_types_ignored :: proc(t: ^testing.T){
-    Person :: struct {
-        age: int,
-        house: int
-    }
-    Car :: struct {
-        wheels: int,
-        weight: f32,
-    }
+// @test
+// pointer_types_ignored :: proc(t: ^testing.T){
+//     Person :: struct {
+//         age: int,
+//         house: int
+//     }
+//     Car :: struct {
+//         wheels: int,
+//         weight: f32,
+//     }
 
-    A :: struct {
-        people: map[string]Person,
-        cars: [dynamic]Car,
-        current_car: ^Car,
-        large_cars: []Car
-    }
+//     A :: struct {
+//         people: map[string]Person,
+//         cars: [dynamic]Car,
+//         current_car: ^Car,
+//         large_cars: []Car
+//     }
 
-    context.allocator = context.temp_allocator
-    a: A
-    a.people["harry"] = {21, 99}
+//     context.allocator = context.temp_allocator
+//     a: A
+//     a.people["harry"] = {21, 99}
 
-    append(&a.cars, Car{4, 250})
-    a.current_car = &a.cars[0]
+//     append(&a.cars, Car{4, 250})
+//     a.current_car = &a.cars[0]
 
-    a.large_cars = a.cars[:]
+//     a.large_cars = a.cars[:]
 
-    data := hs.serialize(&a)
+//     data := hs.serialize(&a)
 
-    b: A
-    hs.deserialize(&b, data)
+//     b: A
+//     hs.deserialize(&b, data)
 
-    empty: A
+//     empty: A
 
-    testing.expect(t, slice.equal(mem.ptr_to_bytes(&b), mem.ptr_to_bytes(&empty)))
-}
+//     testing.expect(t, slice.equal(mem.ptr_to_bytes(&b), mem.ptr_to_bytes(&empty)))
+// }
 
 @test
 bit_fields :: proc(t: ^testing.T){

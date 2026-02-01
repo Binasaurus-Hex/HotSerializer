@@ -41,6 +41,8 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
         enum_fields:    [dynamic]Enum_Field,
         handles:        [dynamic]TypeInfo_Handle,
         arena:          [dynamic]byte,
+
+        check_dynamics: bool,
     }
     ctx := SerializationCtx {}
     context.allocator = context.temp_allocator
@@ -171,6 +173,33 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
             }
 
             save_info.variant = save_union
+
+        // experimental
+        case rt.Type_Info_Dynamic_Array:
+            ctx.check_dynamics = true
+
+            elem := save_type(ctx, v.elem.id)
+
+            save_info.variant = TypeInfo_Dynamic_Array {
+                elem = elem,
+                elem_size = v.elem_size
+            }
+
+        case rt.Type_Info_Slice:
+            ctx.check_dynamics = true
+
+            elem := save_type(ctx, v.elem.id)
+
+            save_info.variant = TypeInfo_Slice {
+                elem = elem,
+                elem_size = v.elem_size
+            }
+
+        case rt.Type_Info_String:
+            ctx.check_dynamics = true
+            save_info.variant = TypeInfo_String {
+                is_cstring = v.is_cstring
+            }
         }
         append(&ctx.types, save_info)
         return TypeInfo_Handle(len(ctx.types))
@@ -202,7 +231,13 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
     append(&bytes, ..mem.slice_to_bytes(header.enum_fields))
     append(&bytes, ..mem.slice_to_bytes(header.handles))
     append(&bytes, ..mem.slice_to_bytes(header.arena))
+
+    header_length := len(bytes)
     append(&bytes, ..mem.ptr_to_bytes(t))
+
+    if ctx.check_dynamics {
+        munch(&bytes, header_length, header_length, type_info_of(T))
+    }
 
     return bytes[:]
 }
@@ -249,6 +284,8 @@ deserialize :: proc(t: ^$T, data: []byte) {
 
     start, ok := get_typeinfo_ptr(header, header.stored_type)
     assert(ok)
+
+    header.data_base = uintptr(&body[0])
 
     identical := deserialize_raw(header, uintptr(&body[0]), uintptr(t), header.stored_type, type_info_of(T))
 }
@@ -572,8 +609,68 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
             return saved_type.identical
 
+        case rt.Type_Info_Dynamic_Array:
+
+            saved_dynamic_array := (&saved_type.variant.(TypeInfo_Dynamic_Array)) or_break
+
+            raw_src := transmute(^mem.Raw_Dynamic_Array)src
+            raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
+            raw_src.cap = raw_src.len
+
+            copy := make([]byte, raw_src.len * saved_dynamic_array.elem_size)
+
+            raw_dst := transmute(^mem.Raw_Dynamic_Array)dst
+            raw_dst.data = &copy[0]
+            raw_dst.len = raw_src.len
+            raw_dst.cap = raw_src.cap
+
+            for i in 0..<raw_src.len {
+                elem_src := uintptr(raw_src.data) + uintptr(i * saved_dynamic_array.elem_size)
+                elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
+                deserialize_raw(header, elem_src, elem_dst, saved_dynamic_array.elem, v.elem)
+            }
+
+            saved_type.identical = false
+            return saved_type.identical
+
+        case rt.Type_Info_String:
+
+            raw_src := transmute(^mem.Raw_String)src
+            raw_src.data = transmute([^]byte)(uintptr(raw_src.data) + header.data_base)
+
+            copy := slice.clone(raw_src.data[:raw_src.len])
+
+            raw_dst := transmute(^mem.Raw_String)dst
+            raw_dst.data = &copy[0]
+            raw_dst.len = raw_src.len
+
+            saved_type.identical = false
+            return saved_type.identical
+
+        case rt.Type_Info_Slice:
+
+            saved_slice := (&saved_type.variant.(TypeInfo_Slice)) or_break
+            raw_src := transmute(^mem.Raw_Slice)src
+            raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
+
+            copy := make([]byte, raw_src.len * saved_slice.elem_size)
+
+            raw_dst := transmute(^mem.Raw_Slice)dst
+            raw_dst.data = &copy[0]
+            raw_dst.len = raw_src.len
+
+            for i in 0..<raw_src.len {
+                elem_src := uintptr(raw_src.data) + uintptr(i * saved_slice.elem_size)
+                elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
+                deserialize_raw(header, elem_src, elem_dst, saved_slice.elem, v.elem)
+            }
+
+            saved_type.identical = false
+            return saved_type.identical
+
+
         // ignored pointer types
-        case rt.Type_Info_Pointer, rt.Type_Info_Map, rt.Type_Info_Dynamic_Array, rt.Type_Info_String, rt.Type_Info_Slice:
+        case rt.Type_Info_Pointer, rt.Type_Info_Map:
             saved_type.identical = false
             return saved_type.identical
         }
@@ -666,6 +763,22 @@ TypeInfo_Named :: struct {
     type: TypeInfo_Handle
 }
 
+// dynamic stuff
+
+TypeInfo_Dynamic_Array :: struct {
+    elem: TypeInfo_Handle,
+    elem_size: int
+}
+
+TypeInfo_Slice :: struct {
+    elem: TypeInfo_Handle,
+    elem_size: int
+}
+
+TypeInfo_String :: struct {
+    is_cstring: bool
+}
+
 TypeInfo :: struct {
     size: int,
     id: typeid,
@@ -677,7 +790,10 @@ TypeInfo :: struct {
         TypeInfo_Enumerated_Array,
         TypeInfo_Bit_Set,
         TypeInfo_Union,
-        TypeInfo_Bit_Field
+        TypeInfo_Bit_Field,
+        TypeInfo_Dynamic_Array,
+        TypeInfo_Slice,
+        TypeInfo_String
     },
 
     // deserialization info
@@ -694,6 +810,8 @@ SaveHeader :: struct {
     arena: []byte,
 
     stored_type: TypeInfo_Handle,
+
+    data_base: uintptr // used when deserializing to know where the memory starts
 }
 
 // string stuff

@@ -218,6 +218,43 @@ speed :: proc(t: ^testing.T){
     }
 }
 
+@test
+dynamic_speed :: proc(t: ^testing.T){
+    if !RUN_SPEED_TESTS do return
+    Car :: struct {
+        wheels: int,
+        id: int,
+        speed: f32,
+        name: string
+    }
+
+    context.allocator = context.temp_allocator
+
+    cars: [dynamic]Car
+    for i in 0..<100_000 {
+        append(&cars, Car {
+            1, 2, 3, "ferrari"
+        })
+    }
+
+    {
+        time_section("hs dynamic")
+        data := hs.serialize(&cars)
+
+        new_cars: [dynamic]Car
+        hs.deserialize(&new_cars, data)
+    }
+
+     {
+        time_section("cbor dynamic")
+
+        data, err := cbor.marshal(cars)
+        new_cars: [dynamic]Car
+        cbor.unmarshal(string(data), &new_cars)
+    }
+
+}
+
 
 time_section_end :: proc(name: string, start: time.Time){
     duration := time.duration_seconds(time.since(start))
