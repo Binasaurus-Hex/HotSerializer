@@ -79,9 +79,43 @@ This is something currently neither cbor nor json support properly.
 Structs and bit_fields similarly can have fields added / removed / modified, and allow for tag features (above)
 ### Union support
 Unions will match on named values first, i.e `Name :: struct`, and then will default to matching based on `typeid`. For more robust union matching across revisions, it is recommended that you use named values. For primitive types you can do this with `distinct`.
-### No Support for dynamically allocated types
-Types such as `string`, `map[K]V`, `[dynamic]T`, `[]T`, or `^T` do not contain the memory within the type itself, but rather contain a pointer to the memory.
-These are currently not supported. If you include one of these in your data structure, they will be ignored.
+
+### Dynamic Types
+Currently, the supported dynamic types are as follows:
+`[dynamic]T`,
+`[]T`,
+`string`,
+`cstring`.
+
+By default, these types are not serialized. However you can enable this feature with the `.Dynamics` option.
+
+```odin
+package main
+import hs "HotSerializer"
+
+main :: proc(){
+    Car :: struct {
+        top_speed: f32,
+        acceleration: f32
+    }
+
+    cars: [dynamic]Car
+    append(&cars, Car { 1, 2 })
+    append(&cars, Car { 3, 4 })
+
+    options := bit_set[hs.Option]{ .Dynamics }
+
+    data := hs.serialize(&cars, options = options)
+
+    saved_cars: [dynamic]Car
+
+    hs.deserialize(&saved_cars, data, options = options)
+}
+```
+the following dynamic types are not currently supported:
+`map`,
+`^T`
+
 ### Limited support for primitive type conversion
 currently there is some limited support for primitive type casting. Below is a list of all primitives that can cast between each other:
 
@@ -114,5 +148,5 @@ currently there is some limited support for primitive type casting. Below is a l
 - hs serialization is always very fast, regardless of the structure of the data.
 - hs deserialization can be arbitrarily slower depending on exactly how different the data is.
 
-## Further Info
-for more info, check out doc.odin, or look through the tests
+# More Examples
+check out the `tests/` directory for more examples on usage.

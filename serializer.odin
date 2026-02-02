@@ -42,7 +42,11 @@ deserialize
     recurse into this data
 */
 
-serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
+Option :: enum {
+    Dynamics
+}
+
+serialize :: proc(t: ^$T, allocator := context.allocator, options := bit_set[Option]{}) -> []byte {
 
     SerializationCtx :: struct {
         types:          [dynamic]TypeInfo,
@@ -231,6 +235,7 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
     header.enum_fields =    ctx.enum_fields[:]
     header.handles =        ctx.handles[:]
     header.arena =          ctx.arena[:]
+    header.options =        options
 
     bytes := make([dynamic]byte, allocator)
 
@@ -245,7 +250,7 @@ serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
     header_length := len(bytes)
     append(&bytes, ..mem.ptr_to_bytes(t))
 
-    if ctx.check_dynamics {
+    if ctx.check_dynamics && .Dynamics in options {
         munch(&bytes, header_length, header_length, type_info_of(T))
     }
 
@@ -267,7 +272,7 @@ get_typeinfo_ptr :: proc(header: ^SaveHeader, handle: TypeInfo_Handle) -> (ptr: 
     return &header.types[index], true
 }
 
-deserialize :: proc(t: ^$T, data: []byte) {
+deserialize :: proc(t: ^$T, data: []byte, options := bit_set[Option]{}) {
 
     split_ref :: proc(s: ^[]$T, index: int) -> []T {
         a, b := slice.split_at(s^, index)
@@ -296,6 +301,7 @@ deserialize :: proc(t: ^$T, data: []byte) {
     assert(ok)
 
     header.data_base = uintptr(&body[0])
+    header.options &= options
 
     identical := deserialize_raw(header, uintptr(&body[0]), uintptr(t), header.stored_type, type_info_of(T))
 }
@@ -621,6 +627,11 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
         case rt.Type_Info_Dynamic_Array:
 
+            if .Dynamics not_in header.options {
+                saved_type.identical = false
+                return saved_type.identical
+            }
+
             saved_dynamic_array := (&saved_type.variant.(TypeInfo_Dynamic_Array)) or_break
 
             raw_src := transmute(^mem.Raw_Dynamic_Array)src
@@ -644,6 +655,11 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             return saved_type.identical
 
         case rt.Type_Info_String:
+
+            if .Dynamics not_in header.options {
+                saved_type.identical = false
+                return saved_type.identical
+            }
 
             saved_string := (&saved_type.variant.(TypeInfo_String)) or_break
 
@@ -674,6 +690,11 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             return saved_type.identical
 
         case rt.Type_Info_Slice:
+
+            if .Dynamics not_in header.options {
+                saved_type.identical = false
+                return saved_type.identical
+            }
 
             saved_slice := (&saved_type.variant.(TypeInfo_Slice)) or_break
             raw_src := transmute(^mem.Raw_Slice)src
@@ -828,12 +849,14 @@ TypeInfo :: struct {
 }
 
 SaveHeader :: struct {
-    types: []TypeInfo,
-    struct_fields: []Struct_Field,
-    bit_fields: []Bit_Field,
-    enum_fields: []Enum_Field,
-    handles: []TypeInfo_Handle,
-    arena: []byte,
+    types:          []TypeInfo,
+    struct_fields:  []Struct_Field,
+    bit_fields:     []Bit_Field,
+    enum_fields:    []Enum_Field,
+    handles:        []TypeInfo_Handle,
+    arena:          []byte,
+
+    options: bit_set[Option],
 
     stored_type: TypeInfo_Handle,
 

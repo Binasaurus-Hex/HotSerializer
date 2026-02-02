@@ -544,7 +544,7 @@ dynamic_types :: proc(t: ^testing.T){
         option_prices
     })
 
-    data := hs.serialize(&cars)
+    data := hs.serialize(&cars, options = {.Dynamics})
 
     for &car in cars {
         car = {}
@@ -575,7 +575,7 @@ dynamic_types :: proc(t: ^testing.T){
     }
 
     saved_cars: [dynamic]CarB
-    hs.deserialize(&saved_cars, data)
+    hs.deserialize(&saved_cars, data, {.Dynamics})
 
     ferrari :=  saved_cars[0]
     jaguar :=   saved_cars[1]

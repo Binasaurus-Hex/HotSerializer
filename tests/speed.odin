@@ -239,13 +239,15 @@ dynamic_speed :: proc(t: ^testing.T){
 
     {
         time_section("hs dynamic")
-        data := hs.serialize(&cars)
+        options := bit_set[hs.Option]{ .Dynamics }
+        data := hs.serialize(&cars, options = options)
 
         new_cars: [dynamic]Car
-        hs.deserialize(&new_cars, data)
-    }
+        hs.deserialize(&new_cars, data, options = options)
 
-     {
+        testing.expect(t, len(new_cars) == 100_000)
+    }
+    {
         time_section("cbor dynamic")
 
         data, err := cbor.marshal(cars)
