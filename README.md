@@ -112,9 +112,11 @@ main :: proc(){
     hs.deserialize(&saved_cars, data, options = options)
 }
 ```
-the following dynamic types are not currently supported:
+The following dynamic types are not currently supported:
 `map`,
-`^T`
+`^T`,
+
+This feature may decrease *serialization* performance arbitrarily, based on the size and nested-ness of the dynamic data.
 
 ### Limited support for primitive type conversion
 currently there is some limited support for primitive type casting. Below is a list of all primitives that can cast between each other:
