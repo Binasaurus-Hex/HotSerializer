@@ -408,43 +408,6 @@ array_length_modification :: proc(t: ^testing.T){
     }
 }
 
-// @test
-// pointer_types_ignored :: proc(t: ^testing.T){
-//     Person :: struct {
-//         age: int,
-//         house: int
-//     }
-//     Car :: struct {
-//         wheels: int,
-//         weight: f32,
-//     }
-
-//     A :: struct {
-//         people: map[string]Person,
-//         cars: [dynamic]Car,
-//         current_car: ^Car,
-//         large_cars: []Car
-//     }
-
-//     context.allocator = context.temp_allocator
-//     a: A
-//     a.people["harry"] = {21, 99}
-
-//     append(&a.cars, Car{4, 250})
-//     a.current_car = &a.cars[0]
-
-//     a.large_cars = a.cars[:]
-
-//     data := hs.serialize(&a)
-
-//     b: A
-//     hs.deserialize(&b, data)
-
-//     empty: A
-
-//     testing.expect(t, slice.equal(mem.ptr_to_bytes(&b), mem.ptr_to_bytes(&empty)))
-// }
-
 @test
 bit_fields :: proc(t: ^testing.T){
 
@@ -522,4 +485,117 @@ primitive_casting :: proc(t: ^testing.T){
     testing.expect(t, b.y == -2)
     testing.expect(t, b.z == 3)
     testing.expect(t, b.q == true)
+}
+
+@test
+dynamic_types :: proc(t: ^testing.T){
+
+    /*
+    currently we support:
+        - dynamic arrays
+        - slices
+        - strings / cstrings
+    */
+
+    Option :: enum {
+        LeatherSeats,
+        SportMode,
+        SunRoof,
+        Umbrellas,
+    }
+
+    Car :: struct {
+        top_speed: f32,
+        acceleration: f32,
+        name: string,
+        manufacturer: cstring,
+        options: []Option,
+
+        // unsupported
+        previous_model: ^Car,
+        option_prices: map[Option]int
+    }
+    context.allocator = context.temp_allocator
+    cars := make([dynamic]Car)
+
+    previous_model: Car
+    option_prices: map[Option]int
+    option_prices[.LeatherSeats] = 1200
+    option_prices[.SportMode] = 2042
+    option_prices[.SunRoof] = 3000
+    option_prices[.Umbrellas] = 800
+
+    append(&cars, Car {
+        200,
+        3,
+        "F50",
+        "ferrari",
+        {.LeatherSeats},
+        &previous_model,
+        option_prices
+    })
+    append(&cars, Car {
+        120,
+        6,
+        "E-Type",
+        "jaguar",
+        {.SportMode, .SunRoof},
+        &previous_model,
+        option_prices
+    })
+
+    data := hs.serialize(&cars)
+
+    for &car in cars {
+        car = {}
+    }
+    clear(&cars)
+
+    OptionB :: enum {
+        ChromeWheels,
+        SatNav,
+        SportMode,
+        SunRoof,
+        Umbrellas,
+        LeatherSeats,
+    }
+
+    CarB :: struct {
+        name: string,
+        top_speed: f32,
+        turn_rate: f32,
+        total_price: f32,
+        acceleration: f32,
+        manufacturer: cstring,
+        options: []OptionB,
+
+        // unsupported
+        previous_model: ^Car,
+        option_prices: map[OptionB]int
+    }
+
+    saved_cars: [dynamic]CarB
+    hs.deserialize(&saved_cars, data)
+
+    ferrari :=  saved_cars[0]
+    jaguar :=   saved_cars[1]
+
+    testing.expect(t, ferrari.top_speed == 200)
+    testing.expect(t, ferrari.acceleration == 3)
+    testing.expect(t, ferrari.manufacturer == "ferrari")
+    testing.expect(t, ferrari.name == "F50")
+    testing.expect(t, ferrari.options[0] == .LeatherSeats)
+
+    testing.expect(t, ferrari.previous_model == nil)
+    testing.expect(t, ferrari.option_prices == nil)
+
+    testing.expect(t, jaguar.top_speed == 120)
+    testing.expect(t, jaguar.acceleration == 6)
+    testing.expect(t, jaguar.manufacturer == "jaguar")
+    testing.expect(t, jaguar.name == "E-Type")
+    testing.expect(t, jaguar.options[0] == .SportMode)
+    testing.expect(t, jaguar.options[1] == .SunRoof)
+
+    testing.expect(t, jaguar.previous_model == nil)
+    testing.expect(t, jaguar.option_prices == nil)
 }

@@ -19,6 +19,11 @@ serialize
 - then dumps this information, followed by the binary of the value you are serializing,
   into a slice of bytes.
 
+- for dynamic structures: maps, dynamic arrays, slices, ...
+    we recurse the actual data,
+    append the dynamic contents to the end of the data
+    'dehydrate' the pointer inside, into an offset relative to the start of the data
+
 deserialize
 - unpacks the type information from the bytes, and then the bytes of the value
 
@@ -30,6 +35,11 @@ deserialize
 
 - this allows us to skip future cases of deserializing identical types, we instead just skip to the fallback option,
   which is a mem copy (faster).
+
+- for dynamic types:
+    'rehydrate' the pointer inside, and fetch our source data
+    allocate the amount of destintion data we need on the heap
+    recurse into this data
 */
 
 serialize :: proc(t: ^$T, allocator := context.allocator) -> []byte {
