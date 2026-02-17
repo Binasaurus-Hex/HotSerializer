@@ -7,7 +7,6 @@ import "core:slice"
 import rt "base:runtime"
 
 TAG :: "hs"
-CAST_PRIMITIVES :: #config(CAST_PRIMITIVES, true)
 
 /*
 -- High level overview --
@@ -40,10 +39,20 @@ deserialize
     'rehydrate' the pointer inside, and fetch our source data
     allocate the amount of destintion data we need on the heap
     recurse into this data
+
 */
 
 Option :: enum {
-    Dynamics
+
+    /* serialize / deserialize dynamic data */
+    Dynamics,
+
+    /*
+    Optimisation, ignored elements may be copied across as a bulk copy operation of parent element.
+    Use if you are sure ignored elements will be reinitialized after deserialization.
+    */
+    Treat_Dynamics_As_Identical,
+
 }
 
 serialize :: proc(t: ^$T, allocator := context.allocator, options := bit_set[Option]{}) -> []byte {
@@ -301,7 +310,9 @@ deserialize :: proc(t: ^$T, data: []byte, options := bit_set[Option]{}) {
     assert(ok)
 
     header.data_base = uintptr(&body[0])
-    header.options &= options
+
+    if .Dynamics not_in options do header.options -= {.Dynamics}
+    if .Treat_Dynamics_As_Identical in options do header.options += { .Treat_Dynamics_As_Identical }
 
     identical := deserialize_raw(header, uintptr(&body[0]), uintptr(t), header.stored_type, type_info_of(T))
 }
@@ -563,7 +574,6 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
         case rt.Type_Info_Union:
             saved_union := (&saved_type.variant.(TypeInfo_Union)) or_break
 
-
             saved_variants := to_slice(header.handles, saved_union.variants)
             actual_variants := v.variants
 
@@ -625,115 +635,111 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
 
             return saved_type.identical
 
-        case rt.Type_Info_Dynamic_Array:
 
-            if .Dynamics not_in header.options {
+        // DYNAMICS
+        case rt.Type_Info_Dynamic_Array, rt.Type_Info_String, rt.Type_Info_Slice, rt.Type_Info_Pointer, rt.Type_Info_Map:
+
+            unsupported: bool
+            #partial switch &v in dst_type.variant {
+            case rt.Type_Info_Pointer, rt.Type_Info_Map: unsupported = true
+            }
+
+            if .Dynamics not_in header.options || unsupported {
+                if .Treat_Dynamics_As_Identical in header.options {
+                    break
+                }
                 saved_type.identical = false
                 return saved_type.identical
             }
 
-            saved_dynamic_array := (&saved_type.variant.(TypeInfo_Dynamic_Array)) or_break
+            #partial switch &v in dst_type.variant {
 
-            raw_src := transmute(^mem.Raw_Dynamic_Array)src
-            raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
-            raw_src.cap = raw_src.len
+            case rt.Type_Info_Dynamic_Array:
 
-            copy := make([]byte, raw_src.len * saved_dynamic_array.elem_size)
+                saved_dynamic_array := (&saved_type.variant.(TypeInfo_Dynamic_Array)) or_break
 
-            raw_dst := transmute(^mem.Raw_Dynamic_Array)dst
-            raw_dst.data = &copy[0]
-            raw_dst.len = raw_src.len
-            raw_dst.cap = raw_src.cap
+                raw_src := transmute(^mem.Raw_Dynamic_Array)src
+                raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
+                raw_src.cap = raw_src.len
 
-            for i in 0..<raw_src.len {
-                elem_src := uintptr(raw_src.data) + uintptr(i * saved_dynamic_array.elem_size)
-                elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
-                deserialize_raw(header, elem_src, elem_dst, saved_dynamic_array.elem, v.elem)
-            }
+                copy := make([]byte, raw_src.len * saved_dynamic_array.elem_size)
 
-            saved_type.identical = false
-            return saved_type.identical
+                raw_dst := transmute(^mem.Raw_Dynamic_Array)dst
+                raw_dst.data = &copy[0]
+                raw_dst.len = raw_src.len
+                raw_dst.cap = raw_src.cap
 
-        case rt.Type_Info_String:
+                for i in 0..<raw_src.len {
+                    elem_src := uintptr(raw_src.data) + uintptr(i * saved_dynamic_array.elem_size)
+                    elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
+                    deserialize_raw(header, elem_src, elem_dst, saved_dynamic_array.elem, v.elem)
+                }
 
-            if .Dynamics not_in header.options {
+                saved_type.identical = false
+                return saved_type.identical
+
+            case rt.Type_Info_String:
+
+                saved_string := (&saved_type.variant.(TypeInfo_String)) or_break
+
+                raw_src := transmute(^mem.Raw_String)src
+                raw_src.data = transmute([^]byte)(uintptr(raw_src.data) + header.data_base)
+                src_len := raw_src.len
+                if saved_string.is_cstring {
+                    src_len = len(cstring(raw_src.data))
+                }
+
+                source_data := raw_src.data[:src_len]
+
+                output_size: int = src_len
+                if v.is_cstring {
+                    output_size += 1
+                }
+
+                output := make([]byte, output_size)
+
+                copy(output, source_data)
+
+                raw_dst := transmute(^mem.Raw_String)dst
+                raw_dst.data = &output[0]
+
+                raw_dst.len = raw_src.len
+
+                saved_type.identical = false
+                return saved_type.identical
+
+            case rt.Type_Info_Slice:
+
+                saved_slice := (&saved_type.variant.(TypeInfo_Slice)) or_break
+                raw_src := transmute(^mem.Raw_Slice)src
+                raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
+
+                copy := make([]byte, raw_src.len * saved_slice.elem_size)
+
+                raw_dst := transmute(^mem.Raw_Slice)dst
+                raw_dst.data = &copy[0]
+                raw_dst.len = raw_src.len
+
+                for i in 0..<raw_src.len {
+                    elem_src := uintptr(raw_src.data) + uintptr(i * saved_slice.elem_size)
+                    elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
+                    deserialize_raw(header, elem_src, elem_dst, saved_slice.elem, v.elem)
+                }
+
                 saved_type.identical = false
                 return saved_type.identical
             }
-
-            saved_string := (&saved_type.variant.(TypeInfo_String)) or_break
-
-            raw_src := transmute(^mem.Raw_String)src
-            raw_src.data = transmute([^]byte)(uintptr(raw_src.data) + header.data_base)
-            src_len := raw_src.len
-            if saved_string.is_cstring {
-                src_len = len(cstring(raw_src.data))
-            }
-
-            source_data := raw_src.data[:src_len]
-
-            output_size: int = src_len
-            if v.is_cstring {
-                output_size += 1
-            }
-
-            output := make([]byte, output_size)
-
-            copy(output, source_data)
-
-            raw_dst := transmute(^mem.Raw_String)dst
-            raw_dst.data = &output[0]
-
-            raw_dst.len = raw_src.len
-
-            saved_type.identical = false
-            return saved_type.identical
-
-        case rt.Type_Info_Slice:
-
-            if .Dynamics not_in header.options {
-                saved_type.identical = false
-                return saved_type.identical
-            }
-
-            saved_slice := (&saved_type.variant.(TypeInfo_Slice)) or_break
-            raw_src := transmute(^mem.Raw_Slice)src
-            raw_src.data = rawptr(uintptr(raw_src.data) + header.data_base)
-
-            copy := make([]byte, raw_src.len * saved_slice.elem_size)
-
-            raw_dst := transmute(^mem.Raw_Slice)dst
-            raw_dst.data = &copy[0]
-            raw_dst.len = raw_src.len
-
-            for i in 0..<raw_src.len {
-                elem_src := uintptr(raw_src.data) + uintptr(i * saved_slice.elem_size)
-                elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
-                deserialize_raw(header, elem_src, elem_dst, saved_slice.elem, v.elem)
-            }
-
-            saved_type.identical = false
-            return saved_type.identical
-
-
-        // ignored pointer types
-        case rt.Type_Info_Pointer, rt.Type_Info_Map:
-            saved_type.identical = false
-            return saved_type.identical
         }
     }
 
     // specified small types that dont automatically transmute
-    when CAST_PRIMITIVES {
+    if saved_type.id != dst_type.id {
 
-        if saved_type.id != dst_type.id {
+        a := mem.make_any(rawptr(src), saved_type.id)
+        b := mem.make_any(rawptr(dst), dst_type.id)
 
-            a := mem.make_any(rawptr(src), saved_type.id)
-            b := mem.make_any(rawptr(dst), dst_type.id)
-
-            if any_to_any(a, b){
-                return false
-            }
+        if any_to_any(a, b){
+            return false
         }
     }
 

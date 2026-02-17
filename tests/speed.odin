@@ -8,7 +8,7 @@ import "core:time"
 import hs ".."
 import "core:mem"
 
-RUN_SPEED_TESTS :: false
+RUN_SPEED_TESTS :: true
 
 
 @test
