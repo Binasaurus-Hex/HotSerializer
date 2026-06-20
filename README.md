@@ -70,6 +70,10 @@ you can use struct field tags to change how hs works.
 - `temp_value` has a value of `-`. This tells hs to ignore the field.
 
 ## Features / Limitations
+### Array, Fixed Capacity Dynamic Arrays
+Arrays, and now `[dynamic; S]T` will work as expected, allowing for modifications of length and structure of elements inside.
+Since `[dynamic; S]T` is an inline value, it will work by default *without* requiring `.Dynamics` to be enabled.
+
 ### Enum, BitSet, Enumerated-Array support
 Enums and their derivatives: bit_sets and enumerated_arrays, are handled properly.
 Meaning you can reorder, add, or remove enum fields, and as long as names stay consistent, hs will match them up.
