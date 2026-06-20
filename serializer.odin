@@ -429,27 +429,10 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
         case rt.Type_Info_Array:
             saved_array := (&saved_type.variant.(TypeInfo_Array)) or_break
             count := min(saved_array.count, v.count)
-            elem_identical: bool
-            for i in 0..<count {
-                elem_src := src + uintptr(i * saved_array.elem_size)
-                elem_dst := dst + uintptr(i * v.elem_size)
 
-                elem_identical = deserialize_raw(header, elem_src, elem_dst, saved_array.elem, v.elem)
-                if elem_identical {
-                    break
-                }
-                else {
-                    saved_type.identical = false
-                }
-            }
-            if elem_identical do break
+            saved_type.identical = deserialize_array(header, src, dst, saved_array.elem, v.elem, count)
             return saved_type.identical
 
-        /*
-        used to just be a regular polymorphic struct, but now a builtin type
-        does currently cause an issue where we cant use the array codepath in an obvious way,
-        posssibly later I will modify this to use dummy type infos to work around this
-        */
         case rt.Type_Info_Fixed_Capacity_Dynamic_Array:
 
             saved_array := (&saved_type.variant.(TypeInfo_Fixed_Capacity_Dynamic_Array)) or_break
@@ -463,16 +446,8 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
                 length_dst^ = length
             }
 
-            elem_identical: bool
-            for i in 0..<length {
-                elem_src := src + uintptr(i * saved_array.elem_size)
-                elem_dst := dst + uintptr(i * v.elem_size)
-
-                elem_identical = deserialize_raw(header, elem_src, elem_dst, saved_array.elem, v.elem)
-                if !elem_identical {
-                    saved_type.identical = false
-                }
-            }
+            array_identical := deserialize_array(header, src, dst, saved_array.elem, v.elem, length)
+            saved_type.identical = array_identical && (saved_array.len_offset == v.len_offset)
             return saved_type.identical
 
         case rt.Type_Info_Enum:
@@ -708,11 +683,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
                 raw_dst.len = raw_src.len
                 raw_dst.cap = raw_src.cap
 
-                for i in 0..<raw_src.len {
-                    elem_src := uintptr(raw_src.data) + uintptr(i * saved_dynamic_array.elem_size)
-                    elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
-                    deserialize_raw(header, elem_src, elem_dst, saved_dynamic_array.elem, v.elem)
-                }
+                deserialize_array(header, uintptr(raw_src.data), uintptr(raw_dst.data), saved_dynamic_array.elem, v.elem, raw_src.len)
 
                 saved_type.identical = false
                 return saved_type.identical
@@ -759,12 +730,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
                 raw_dst.data = &copy[0]
                 raw_dst.len = raw_src.len
 
-                for i in 0..<raw_src.len {
-                    elem_src := uintptr(raw_src.data) + uintptr(i * saved_slice.elem_size)
-                    elem_dst := uintptr(raw_dst.data) + uintptr(i * v.elem_size)
-                    deserialize_raw(header, elem_src, elem_dst, saved_slice.elem, v.elem)
-                }
-
+                deserialize_array(header, uintptr(raw_src.data), uintptr(raw_dst.data), saved_slice.elem, v.elem, raw_src.len)
                 saved_type.identical = false
                 return saved_type.identical
             }
@@ -787,6 +753,31 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
     size := min(saved_type.size, dst_type.size)
     mem.copy(rawptr(dst), rawptr(src), size)
     return saved_type.identical
+}
+
+deserialize_array :: proc(header: ^SaveHeader, src, dst: uintptr, src_elem_type: TypeInfo_Handle, dst_elem_type: ^rt.Type_Info, count: int) -> (identical: bool) {
+
+    src_elem_info, ok := get_typeinfo_ptr(header, src_elem_type)
+    assert(ok)
+
+    src_elem_size: int = src_elem_info.size
+    dst_elem_size: int = dst_elem_type.size
+
+    i: int
+    for i = 0; i < count; i += 1 {
+        elem_src := src + uintptr(i * src_elem_size)
+        elem_dst := dst + uintptr(i * dst_elem_size)
+
+        identical = deserialize_raw(header, elem_src, elem_dst, src_elem_type, dst_elem_type)
+        if identical do break
+    }
+    if identical {
+        assert(src_elem_size == dst_elem_size)
+        elem_size := src_elem_size
+        remaining_bytes: int = (count - i) * elem_size
+        mem.copy(rawptr(dst + uintptr(i * elem_size)), rawptr(src + uintptr(i * elem_size)), remaining_bytes)
+    }
+    return identical
 }
 
 // TYPE INFO
