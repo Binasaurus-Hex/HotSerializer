@@ -156,3 +156,42 @@ currently there is some limited support for primitive type casting. Below is a l
 
 # More Examples
 check out the `tests/` directory for more examples on usage.
+
+# Inline / Dynamic explained
+`hs` works best when used alongside a style of coding that favours 'inline' values as opposed to 'dynamic' values.
+This is because 'inline' values are stored within the containing structure. For example:
+
+`
+State :: struct {
+    items: [dynamic; 5]Item,
+}
+`
+
+Would in memory look like:
+
+`
+Item | Item | Item | Item | Item | len
+`
+
+Which can be trivially copied and stored.
+
+However a dynamic value:
+
+`
+State :: struct {
+    items: [dynamic]Item
+}
+`
+
+Would in memory look like:
+
+`
+data | len | capacity | allocator
+`
+
+Since the actual *data* lives elsewhere in memory, `hs` now has to manually inspect these dynamic elements, and copy the data they point to.
+Therefore `hs` loses two important optimsations:
+- it can no longer do a bulk memcopy of the input when *serializing*
+- it can no longer memcopy identical elements that contain dynamics when *deserializing*
+
+This is why by default, dynamics are turned off.
