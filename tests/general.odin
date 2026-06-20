@@ -488,6 +488,35 @@ primitive_casting :: proc(t: ^testing.T){
 }
 
 @test
+fixed_capacity_dynamics :: proc(t: ^testing.T){
+
+    points_a: [dynamic; 100][2]f32
+    append(&points_a, [2]f32{ 1, 2 })
+    append(&points_a, [2]f32{ 3, 4 })
+    append(&points_a, [2]f32{ 5, 6 })
+
+    data := hs.serialize(&points_a)
+    defer delete(data)
+
+    points_b: [dynamic; 200][2]f32
+    hs.deserialize(&points_b, data)
+
+    for i in 0..<len(points_a){
+        testing.expect(t, points_a[i] == points_b[i])
+    }
+
+    data = hs.serialize(&points_a)
+
+    points_c: [dynamic; 2][2]f32
+    hs.deserialize(&points_c, data)
+
+    testing.expectf(t, len(points_c) == 2, "{}", points_c)
+    for i in 0..<len(points_c){
+        testing.expect(t, points_a[i] == points_c[i])
+    }
+}
+
+@test
 dynamic_types :: proc(t: ^testing.T){
 
     /*

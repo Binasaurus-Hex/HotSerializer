@@ -125,6 +125,15 @@ serialize :: proc(t: ^$T, allocator := context.allocator, options := bit_set[Opt
                 count = v.count
             }
 
+        case rt.Type_Info_Fixed_Capacity_Dynamic_Array:
+            elem := save_type(ctx, v.elem.id)
+            save_info.variant = TypeInfo_Fixed_Capacity_Dynamic_Array {
+                elem = elem,
+                elem_size = v.elem_size,
+                capacity = v.capacity,
+                len_offset = v.len_offset,
+            }
+
         case rt.Type_Info_Enum:
             save_enum := TypeInfo_Enum {}
             actual_fields := reflect.enum_fields_zipped(type)
@@ -434,6 +443,36 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
                 }
             }
             if elem_identical do break
+            return saved_type.identical
+
+        /*
+        used to just be a regular polymorphic struct, but now a builtin type
+        does currently cause an issue where we cant use the array codepath in an obvious way,
+        posssibly later I will modify this to use dummy type infos to work around this
+        */
+        case rt.Type_Info_Fixed_Capacity_Dynamic_Array:
+
+            saved_array := (&saved_type.variant.(TypeInfo_Fixed_Capacity_Dynamic_Array)) or_break
+
+            capacity := min(saved_array.capacity, v.capacity)
+            length :int = (^int)(src + saved_array.len_offset)^
+            length = min(length, capacity)
+            // copy len
+            {
+                length_dst: ^int = (^int)(dst + v.len_offset)
+                length_dst^ = length
+            }
+
+            elem_identical: bool
+            for i in 0..<length {
+                elem_src := src + uintptr(i * saved_array.elem_size)
+                elem_dst := dst + uintptr(i * v.elem_size)
+
+                elem_identical = deserialize_raw(header, elem_src, elem_dst, saved_array.elem, v.elem)
+                if !elem_identical {
+                    saved_type.identical = false
+                }
+            }
             return saved_type.identical
 
         case rt.Type_Info_Enum:
@@ -791,6 +830,13 @@ TypeInfo_Array :: struct {
     count: int
 }
 
+TypeInfo_Fixed_Capacity_Dynamic_Array :: struct {
+    elem: TypeInfo_Handle,
+	elem_size:  int,
+	capacity:   int,
+	len_offset: uintptr,
+}
+
 TypeInfo_Enumerated_Array :: struct {
     elem: TypeInfo_Handle,
     index: TypeInfo_Handle,
@@ -840,6 +886,7 @@ TypeInfo :: struct {
         TypeInfo_Struct,
         TypeInfo_Enum,
         TypeInfo_Array,
+        TypeInfo_Fixed_Capacity_Dynamic_Array,
         TypeInfo_Enumerated_Array,
         TypeInfo_Bit_Set,
         TypeInfo_Union,
