@@ -423,6 +423,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
                 }
             }
             if identical_fields != len(fields) do saved_type.identical = false
+            if len(fields) != len(saved_fields) do saved_type.identical = false
 
             return saved_type.identical
 
