@@ -409,6 +409,44 @@ array_length_modification :: proc(t: ^testing.T){
 }
 
 @test
+array_identical :: proc(t: ^testing.T){
+    values: [20][20]int
+
+    for &row, i in values {
+        for &col, j in row {
+            col = i * j
+        }
+    }
+
+    // nested size decrease
+
+    data := hs.serialize(&values)
+
+    values_2: [10][10]int
+    hs.deserialize(&values_2, data)
+
+    for &row, i in values_2 {
+        for &col, j in row {
+            testing.expect(t, values[i][j] == col)
+        }
+    }
+
+
+    // nested size increase
+
+    data = hs.serialize(&values)
+
+    values_3: [30][30]int
+    hs.deserialize(&values_3, data)
+
+    for &row, i in values {
+        for &col, j in row {
+            testing.expect(t, values_3[i][j] == col)
+        }
+    }
+}
+
+@test
 bit_fields :: proc(t: ^testing.T){
 
     Height :: enum {

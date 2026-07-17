@@ -432,7 +432,7 @@ deserialize_raw :: proc(header: ^SaveHeader, src, dst: uintptr, src_type: TypeIn
             count := min(saved_array.count, v.count)
 
             saved_type.identical = deserialize_array(header, src, dst, saved_array.elem, v.elem, count)
-            return saved_type.identical
+            return saved_type.identical && saved_array.count == v.count
 
         case rt.Type_Info_Fixed_Capacity_Dynamic_Array:
 
@@ -765,20 +765,21 @@ deserialize_array :: proc(header: ^SaveHeader, src, dst: uintptr, src_elem_type:
     dst_elem_size: int = dst_elem_type.size
 
     i: int
+    element_identical: bool
     for i = 0; i < count; i += 1 {
         elem_src := src + uintptr(i * src_elem_size)
         elem_dst := dst + uintptr(i * dst_elem_size)
 
-        identical = deserialize_raw(header, elem_src, elem_dst, src_elem_type, dst_elem_type)
-        if identical do break
+        element_identical = deserialize_raw(header, elem_src, elem_dst, src_elem_type, dst_elem_type)
+        if element_identical do break
     }
-    if identical {
+    if element_identical {
         assert(src_elem_size == dst_elem_size)
         elem_size := src_elem_size
         remaining_bytes: int = (count - i) * elem_size
         mem.copy(rawptr(dst + uintptr(i * elem_size)), rawptr(src + uintptr(i * elem_size)), remaining_bytes)
     }
-    return identical
+    return element_identical
 }
 
 // TYPE INFO
